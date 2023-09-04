@@ -14,6 +14,10 @@ from vyper import compiler
 from vyper.ast.grammar import parse_vyper_source
 from vyper.compiler.settings import Settings
 
+import tempfile
+import subprocess
+import json
+
 
 class VyperMethod:
     ALLOWED_MODIFIERS = {"call", "estimateGas", "transact", "buildTransaction"}
@@ -116,16 +120,30 @@ def _get_contract(w3, source_code, optimize, *args, override_opt_level=None, **k
     settings = Settings()
     settings.evm_version = kwargs.pop("evm_version", None)
     settings.optimize = override_opt_level or optimize
+
+    interface_codes = kwargs.pop("interface_codes", None)
+
     out = compiler.compile_code(
         source_code,
         # test that metadata gets generated
         ["abi", "bytecode", "metadata"],
         settings=settings,
-        interface_codes=kwargs.pop("interface_codes", None),
+        interface_codes=interface_codes,
         show_gas_estimates=True,  # Enable gas estimates for testing
     )
     parse_vyper_source(source_code)  # Test grammar.
     json.dumps(out["metadata"])  # test metadata is json serializable
+
+    if current_version != None:
+        with tempfile.NamedTemporaryFile() as f:
+            f.write(source_code.encode())
+            f.flush()
+
+            #subprocess.check_output(["/bin/sh", "-c", "cat <<EOF > /tmp/z\n" + source_code + "\nEOF\n"])
+            output = subprocess.check_output(["docker", "run", "-v", f.name + ":/code/target.vy", "vyperlang/vyper:" + current_version, "/code/target.vy", "-f", "combined_json"]).decode()
+            out = json.loads(output)["target.vy"]
+
+
     abi = out["abi"]
     bytecode = out["bytecode"]
     value = kwargs.pop("value_in_eth", 0) * 10**18  # Handle deploying with an eth value.
@@ -184,6 +202,60 @@ def deploy_blueprint_for(w3, optimize):
 
     return deploy_blueprint_for
 
+current_version = None
+
+@pytest.fixture(scope="module")
+def test_versions():
+    versions = [
+        "0.2.0",
+        "0.2.1",
+        "0.2.2",
+        "0.2.3",
+        "0.2.4",
+        "0.2.5",
+        "0.2.6",
+        "0.2.7",
+        "0.2.8",
+        "0.2.11",
+        "0.2.12",
+        "0.2.13",
+        "0.2.15",
+        "0.2.16",
+        "0.3.0",
+        "0.3.1",
+        "0.3.2",
+        "0.3.3",
+        "0.3.4",
+        "0.3.5",
+        "0.3.6",
+        "0.3.7",
+        "0.3.8",
+        "0.3.9",
+    ]
+
+    class VersionIterator:
+        def __init__(self, start, end):
+            self.idx = versions.index(start)
+            self.end = versions.index(end)
+
+        def __iter__(self):
+            assert current_version == None
+            return self
+
+        def __next__(self):
+            if self.idx <= self.end:
+                global current_version
+                current_version = versions[self.idx]
+                self.idx += 1
+                return True
+            current_version = None
+            raise StopIteration
+
+    def test_versions(start, end):
+        assert start in versions and end in versions
+        return iter(VersionIterator(start, end))
+
+    return test_versions
 
 @pytest.fixture(scope="module")
 def get_contract(w3, optimize):

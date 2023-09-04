@@ -1,11 +1,12 @@
 import pytest
 
+import subprocess
 from vyper.exceptions import FunctionDeclarationException
 
 
 # TODO test functions in this module across all evm versions
 # once we have cancun support.
-def test_nonreentrant_decorator(get_contract, assert_tx_failed):
+def test_nonreentrant_decorator(get_contract, assert_tx_failed, test_versions):
     calling_contract_code = """
 interface SpecialContract:
     def unprotected_function(val: String[100], do_callback: bool): nonpayable
@@ -83,32 +84,33 @@ def unprotected_function(val: String[100], do_callback: bool):
         self.callback.updated()
     """
 
-    reentrant_contract = get_contract(reentrant_code)
-    calling_contract = get_contract(calling_contract_code)
+    for _ in test_versions("0.2.0", "0.3.9"):
+        reentrant_contract = get_contract(reentrant_code)
+        calling_contract = get_contract(calling_contract_code)
 
-    reentrant_contract.set_callback(calling_contract.address, transact={})
-    assert reentrant_contract.callback() == calling_contract.address
+        reentrant_contract.set_callback(calling_contract.address, transact={})
+        assert reentrant_contract.callback() == calling_contract.address
 
-    # Test unprotected function.
-    reentrant_contract.unprotected_function("some value", True, transact={})
-    assert reentrant_contract.special_value() == "surprise!"
+        # Test unprotected function.
+        reentrant_contract.unprotected_function("some value", True, transact={})
+        assert reentrant_contract.special_value() == "surprise!"
 
-    # Test protected function.
-    reentrant_contract.protected_function("some value", False, transact={})
-    assert reentrant_contract.special_value() == "some value"
-    assert reentrant_contract.protected_view_fn() == "some value"
+        # Test protected function.
+        reentrant_contract.protected_function("some value", False, transact={})
+        assert reentrant_contract.special_value() == "some value"
+        assert reentrant_contract.protected_view_fn() == "some value"
 
-    assert_tx_failed(lambda: reentrant_contract.protected_function("zzz value", True, transact={}))
+        assert_tx_failed(lambda: reentrant_contract.protected_function("zzz value", True, transact={}))
 
-    reentrant_contract.protected_function2("another value", False, transact={})
-    assert reentrant_contract.special_value() == "another value"
+        reentrant_contract.protected_function2("another value", False, transact={})
+        assert reentrant_contract.special_value() == "another value"
 
-    assert_tx_failed(lambda: reentrant_contract.protected_function2("zzz value", True, transact={}))
+        assert_tx_failed(lambda: reentrant_contract.protected_function2("zzz value", True, transact={}))
 
-    reentrant_contract.protected_function3("another value", False, transact={})
-    assert reentrant_contract.special_value() == "another value"
+        reentrant_contract.protected_function3("another value", False, transact={})
+        assert reentrant_contract.special_value() == "another value"
 
-    assert_tx_failed(lambda: reentrant_contract.protected_function3("zzz value", True, transact={}))
+        assert_tx_failed(lambda: reentrant_contract.protected_function3("zzz value", True, transact={}))
 
 
 def test_nonreentrant_decorator_for_default(w3, get_contract, assert_tx_failed):
@@ -199,7 +201,6 @@ def __default__():
     assert_tx_failed(
         lambda: reentrant_contract.protected_function("zzz value", True, transact={"value": 1000})
     )
-
 
 def test_disallow_on_init_function(get_contract):
     # nonreentrant has no effect when used on the __init__ fn
